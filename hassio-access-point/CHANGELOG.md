@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.6.0] - 2025-01-17
+
+### Changed
+- **MAJOR UPDATE**: Updated for compatibility with newest Home Assistant OS hypervisor
+- Updated to use Home Assistant naming conventions (changed from "Hass.io" to "Home Assistant")
+- Improved error handling and network interface management for newer NetworkManager versions
+- Enhanced iptables rules for better internet access routing with proper stateful connections
+- Added fallback DNS resolution methods for improved reliability
+- Better cleanup on container shutdown with proper iptables rule removal
+- Added configuration validation for hostapd before starting
+- Improved logging throughout the addon
+- Updated Dockerfile with additional required packages for newer HAOS versions
+- Added minimum Home Assistant version requirement (2024.1.0)
+- Enhanced compatibility with Home Assistant OS 16.x series
+
+### Fixed
+- Fixed compatibility issues with newer Home Assistant OS networking stack
+- Improved DNS resolution fallback mechanisms
+- Better handling of missing network interfaces
+- Fixed potential IP address configuration issues on newer systems
+
 ## [0.5.2.1] - 2024-04-02
 
 ### Fixed

@@ -1,5 +1,7 @@
-# Hass.io Access Point
-Use your hass.io host as a WiFi access point - perfect for off-grid and security focused installations.
+# Home Assistant Access Point
+Use your Home Assistant host as a WiFi access point - perfect for off-grid and security focused installations.
+
+**✨ Updated for Home Assistant OS 16.x and newer hypervisor versions ✨**
 
 ## Main features
 - Create a WiFi access point with built-in (Raspberry Pi) or external WiFi (USB) cards (using hostapd)
@@ -7,12 +9,13 @@ Use your hass.io host as a WiFi access point - perfect for off-grid and security
 - DHCP server (Optional. Uses dnsmasq)
 - MAC address filtering (allow/deny)
 - Internet routing for clients (Optional)
-
+- Enhanced compatibility with newer Home Assistant OS versions
+- Improved error handling and network management
 
 ## Installation
 
 Please add
-`https://github.com/mattlongman/hassio-access-point` to your hass.io addon repositories list. If you're not sure how, see [instructions](https://www.home-assistant.io/hassio/installing_third_party_addons/) on the Home Assistant website.
+`https://github.com/mattlongman/hassio-access-point` to your Home Assistant addon repositories list. If you're not sure how, see [instructions](https://www.home-assistant.io/hassio/installing_third_party_addons/) on the Home Assistant website.
 
 ## Config
 
@@ -62,6 +65,13 @@ Note: use either allow or deny lists for MAC filtering. If using allow, deny wil
 
 ### Device & OS compatibility
 
-New releases will always be tested on the latest Home Assistant OS using Raspberry Pi 3B+ and Pi 4, but existing versions won't be proactively tested when new Home Assistant OS/Supervisor versions are released. If a new HAOS/Supervisor version breaks something, please raise an issue.
+**New in v0.6.0**: Enhanced compatibility with Home Assistant OS 16.x series and newer hypervisor versions.
 
-This add-on should work with 32 & 64 bit HAOS, and has also been tested on Debian 10 with Home Assistant Supervised.
+This add-on is actively tested on the latest Home Assistant OS using Raspberry Pi 3B+, Pi 4, and Pi 5. It's optimized for:
+- Home Assistant OS 16.0+ (recommended)
+- Home Assistant OS 10.0+ (legacy support)
+- Home Assistant Core 2024.1.0+
+
+The add-on works with 32 & 64 bit HAOS, and has also been tested on Debian-based systems with Home Assistant Supervised.
+
+**Note**: If you encounter issues with newer Home Assistant OS versions, please check the [issues page](https://github.com/mattlongman/hassio-access-point/issues) or create a new issue with your system details.

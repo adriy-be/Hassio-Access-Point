@@ -1,11 +1,19 @@
 #!/usr/bin/with-contenv bashio
 
-# SIGTERM-handler this funciton will be executed when the container receives the SIGTERM signal (when stopping)
+# SIGTERM-handler this function will be executed when the container receives the SIGTERM signal (when stopping)
 term_handler(){
-	logger "Stopping Hass.io Access Point" 0
-	ifdown $INTERFACE
-	ip link set $INTERFACE down
-	ip addr flush dev $INTERFACE
+	logger "Stopping Home Assistant Access Point" 0
+	# Clean up iptables rules if they were added
+	if $(bashio::config.true "client_internet_access"); then
+		iptables-nft -t nat -D POSTROUTING -o $DEFAULT_ROUTE_INTERFACE -j MASQUERADE 2>/dev/null || true
+		iptables-nft -P FORWARD DROP 2>/dev/null || true
+	fi
+	# Clean up network interface
+	ifdown $INTERFACE 2>/dev/null || true
+	ip link set $INTERFACE down 2>/dev/null || true
+	ip addr flush dev $INTERFACE 2>/dev/null || true
+	# Re-enable NetworkManager management
+	nmcli dev set $INTERFACE managed yes 2>/dev/null || true
 	exit 0
 }
 
@@ -55,7 +63,7 @@ DNSMASQ_CONFIG_OVERRIDE=$(bashio::config 'dnsmasq_config_override' )
 # Get the Default Route interface
 DEFAULT_ROUTE_INTERFACE=$(ip route show default | awk '/^default/ { print $5 }')
 
-echo "Starting Hass.io Access Point Addon"
+echo "Starting Home Assistant Access Point Addon"
 
 # Setup interface
 logger "# Setup interface:" 1
@@ -64,7 +72,12 @@ logger "Add to /etc/network/interfaces: iface $INTERFACE inet static" 1
 echo "iface $INTERFACE inet static"$'\n' >> /etc/network/interfaces
 
 logger "Run command: nmcli dev set $INTERFACE managed no" 1
-nmcli dev set $INTERFACE managed no
+# Check if NetworkManager is available and interface exists
+if nmcli dev status | grep -q "^$INTERFACE"; then
+    nmcli dev set $INTERFACE managed no
+else
+    logger "Warning: Interface $INTERFACE not found in NetworkManager, continuing..." 1
+fi
 
 logger "Run command: ip link set $INTERFACE down" 1
 ip link set $INTERFACE down
@@ -138,7 +151,16 @@ fi
 
 
 # Set address for the selected interface. Not sure why this is now not being set via /etc/network/interfaces, but maybe interfaces file is no longer required...
-ifconfig $INTERFACE $ADDRESS netmask $NETMASK broadcast $BROADCAST
+logger "Setting IP address for interface $INTERFACE" 1
+
+# Convert netmask to CIDR notation for modern ip command
+CIDR=$(ipcalc -p $ADDRESS $NETMASK 2>/dev/null | cut -d= -f2 || echo "24")
+
+if ! ifconfig $INTERFACE $ADDRESS netmask $NETMASK broadcast $BROADCAST 2>/dev/null; then
+    logger "Warning: Failed to set IP address via ifconfig, trying ip command" 1
+    ip addr add $ADDRESS/$CIDR dev $INTERFACE broadcast $BROADCAST
+    ip link set $INTERFACE up
+fi
 
 # Add interface to hostapd.conf
 logger "Add to hostapd.conf: interface=$INTERFACE" 1
@@ -173,14 +195,27 @@ if $(bashio::config.true "dhcp"); then
             echo "$dns_string"$'\n' >> /dnsmasq.conf
             logger "Add custom DNS: $dns_string" 0
         else
-            IFS=$'\n' read -r -d '' -a dns_array < <( nmcli device show | grep IP4.DNS | awk '{print $2}' && printf '\0' )
+            # Get DNS servers from NetworkManager - improved for newer versions
+            IFS=$'\n' read -r -d '' -a dns_array < <( (nmcli device show | grep IP4.DNS | awk '{print $2}' || nmcli con show --active | grep IP4.DNS | awk '{print $2}') && printf '\0' )
+
+            if [ ${#dns_array[@]} -eq 0 ]; then
+                # Fallback to resolv.conf if NetworkManager doesn't provide DNS
+                IFS=$'\n' read -r -d '' -a dns_array < <( grep "^nameserver" /etc/resolv.conf | awk '{print $2}' && printf '\0' )
+                logger "Using DNS servers from /etc/resolv.conf as fallback" 1
+            fi
 
             if [ ${#dns_array[@]} -eq 0 ]; then
                 logger "Couldn't get DNS servers from host. Consider setting with 'client_dns_override' config option." 0
+                # Use Google DNS as last resort
+                dns_array=("8.8.8.8" "8.8.4.4")
+                logger "Using Google DNS servers as last resort" 1
             else
                 dns_string="dhcp-option=6"
                 for dns_entry in "${dns_array[@]}"; do
-                    dns_string+=",$dns_entry"
+                    # Validate IP address format
+                    if [[ $dns_entry =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                        dns_string+=",$dns_entry"
+                    fi
                 done
                 echo "$dns_string"$'\n' >> /dnsmasq.conf
                 logger "Add DNS: $dns_string" 0
@@ -203,11 +238,23 @@ fi
 
 # Setup Client Internet Access
 if $(bashio::config.true "client_internet_access"); then
-
-    ## Route traffic
-    iptables-nft -t nat -A POSTROUTING -o $DEFAULT_ROUTE_INTERFACE -j MASQUERADE
-    iptables-nft -P FORWARD ACCEPT
-    iptables-nft -F FORWARD
+    logger "# Setting up client internet access" 1
+    
+    # Ensure we have a default route interface
+    if [ -z "$DEFAULT_ROUTE_INTERFACE" ]; then
+        DEFAULT_ROUTE_INTERFACE=$(ip route show default | awk '/^default/ { print $5 }' | head -n1)
+        logger "Default route interface: $DEFAULT_ROUTE_INTERFACE" 1
+    fi
+    
+    if [ -n "$DEFAULT_ROUTE_INTERFACE" ]; then
+        ## Route traffic - using newer iptables-nft commands
+        logger "Setting up NAT masquerading on $DEFAULT_ROUTE_INTERFACE" 1
+        iptables-nft -t nat -A POSTROUTING -o $DEFAULT_ROUTE_INTERFACE -j MASQUERADE
+        iptables-nft -A FORWARD -i $INTERFACE -o $DEFAULT_ROUTE_INTERFACE -j ACCEPT
+        iptables-nft -A FORWARD -i $DEFAULT_ROUTE_INTERFACE -o $INTERFACE -m state --state RELATED,ESTABLISHED -j ACCEPT
+    else
+        logger "Warning: No default route interface found, client internet access may not work" 0
+    fi
 fi
 
 # Start dnsmasq if DHCP is enabled in config
@@ -217,9 +264,21 @@ if $(bashio::config.true "dhcp"); then
 fi
 
 logger "## Starting hostapd daemon" 1
+# Verify hostapd configuration before starting
+if ! hostapd -t /hostapd.conf; then
+    logger "Error: hostapd configuration validation failed" 0
+    exit 1
+fi
+
 # If debug level is greater than 1, start hostapd in debug mode
 if [ $DEBUG -gt 1 ]; then
+    logger "Starting hostapd in debug mode" 1
     hostapd -d /hostapd.conf & wait ${!}
 else
+    logger "Starting hostapd daemon" 1
     hostapd /hostapd.conf & wait ${!}
 fi
+
+# If we reach this point, hostapd has exited - clean up
+logger "hostapd has exited, cleaning up..." 0
+term_handler
