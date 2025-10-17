@@ -154,7 +154,31 @@ fi
 logger "Setting IP address for interface $INTERFACE" 1
 
 # Convert netmask to CIDR notation for modern ip command
-CIDR=$(ipcalc -p $ADDRESS $NETMASK 2>/dev/null | cut -d= -f2 || echo "24")
+# Function to convert netmask to CIDR
+netmask_to_cidr() {
+    local netmask=$1
+    local cidr=0
+    local octet
+    
+    IFS='.' read -ra octets <<< "$netmask"
+    for octet in "${octets[@]}"; do
+        case $octet in
+            255) cidr=$((cidr + 8)) ;;
+            254) cidr=$((cidr + 7)) ;;
+            252) cidr=$((cidr + 6)) ;;
+            248) cidr=$((cidr + 5)) ;;
+            240) cidr=$((cidr + 4)) ;;
+            224) cidr=$((cidr + 3)) ;;
+            192) cidr=$((cidr + 2)) ;;
+            128) cidr=$((cidr + 1)) ;;
+            0) ;;
+            *) cidr=24; break ;;
+        esac
+    done
+    echo $cidr
+}
+
+CIDR=$(netmask_to_cidr "$NETMASK")
 
 if ! ifconfig $INTERFACE $ADDRESS netmask $NETMASK broadcast $BROADCAST 2>/dev/null; then
     logger "Warning: Failed to set IP address via ifconfig, trying ip command" 1

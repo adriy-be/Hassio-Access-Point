@@ -15,7 +15,7 @@ Use your Home Assistant host as a WiFi access point - perfect for off-grid and s
 ## Installation
 
 Please add
-`https://github.com/mattlongman/hassio-access-point` to your Home Assistant addon repositories list. If you're not sure how, see [instructions](https://www.home-assistant.io/hassio/installing_third_party_addons/) on the Home Assistant website.
+`https://github.com/adriy-be/Hassio-Access-Point` to your Home Assistant addon repositories list. If you're not sure how, see [instructions](https://www.home-assistant.io/hassio/installing_third_party_addons/) on the Home Assistant website.
 
 ## Config
 

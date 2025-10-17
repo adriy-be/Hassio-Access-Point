@@ -1,11 +1,11 @@
-ARG BUILD_FROM
+ARG BUILD_FROM=ghcr.io/home-assistant/aarch64-base:latest
 FROM $BUILD_FROM
 
-MAINTAINER Matt Longman <git@mattlongman.com>
+LABEL maintainer="Matt Longman <git@mattlongman.com>"
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-ENV LANG C.UTF-8
+ENV LANG=C.UTF-8
 
 # Install required packages for Home Assistant OS compatibility
 RUN apk update && \
@@ -21,9 +21,7 @@ apk add --no-cache \
     iptables \
     ip6tables \
     iproute2 \
-    grep \
-    awk \
-    ipcalc && \
+    gawk && \
 rm -rf /var/cache/apk/*
 
 COPY hostapd.conf /
