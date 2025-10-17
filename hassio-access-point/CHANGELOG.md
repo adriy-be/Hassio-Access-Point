@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.6.5] - 2025-10-17
+
+### Added
+- **Comprehensive Troubleshooting**: Added extensive pre-flight checks and diagnostics for "no WiFi appearing" issues
+- **Configuration Validation**: Added detailed validation of SSID, password, and all required settings
+- **Wireless Interface Detection**: Enhanced detection and validation of wireless interfaces with AP mode support
+- **RF Kill Management**: Added automatic detection and unblocking of RF-killed wireless devices
+- **Progressive hostapd Monitoring**: Added step-by-step monitoring of hostapd startup with detailed error messages
+- **Common Issue Detection**: Added detection and guidance for common configuration problems
+
+### Fixed
+- **Missing Configuration Detection**: Better error messages when SSID or password are not configured
+- **Interface Compatibility**: Added checks to verify wireless interface supports AP mode before attempting setup
+- **Process Monitoring**: Improved detection of hostapd startup failures with specific troubleshooting guidance
+- **Configuration Display**: Enhanced logging of all configuration parameters for easier debugging
+
+### Changed
+- **Error Messages**: Much more detailed and actionable error messages for common failure scenarios
+- **Startup Sequence**: Added systematic pre-flight checks before attempting network configuration
+- **Logging Structure**: Organized diagnostic output into clear sections for easier troubleshooting
+
 ## [0.6.3] - 2025-10-17
 
 ### Fixed

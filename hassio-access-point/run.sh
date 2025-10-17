@@ -65,6 +65,51 @@ DEFAULT_ROUTE_INTERFACE=$(ip route show default | awk '/^default/ { print $5 }')
 
 echo "Starting Home Assistant Access Point Addon"
 
+# Pre-flight checks function
+preflight_checks() {
+    logger "=== Pre-flight System Checks ===" 1
+    
+    # Check if we're running with the right privileges
+    if [ "$(id -u)" -ne 0 ]; then
+        logger "Error: Must run as root for network configuration" 0
+        return 1
+    fi
+    logger "✓ Running as root" 1
+    
+    # Check required commands
+    local required_commands="hostapd iw ip"
+    for cmd in $required_commands; do
+        if ! command -v $cmd >/dev/null 2>&1; then
+            logger "Error: Required command '$cmd' not found" 0
+            return 1
+        fi
+    done
+    logger "✓ Required commands available" 1
+    
+    # Check for RF kill blocks
+    if command -v rfkill >/dev/null 2>&1; then
+        blocked_devices=$(rfkill list | grep -E "(Wireless LAN|WiFi)" | grep "blocked: yes" || true)
+        if [ -n "$blocked_devices" ]; then
+            logger "Warning: Some wireless devices are blocked by rfkill:" 1
+            echo "$blocked_devices" | while read line; do logger "  $line" 1; done
+            logger "Attempting to unblock..." 1
+            rfkill unblock wifi || logger "Failed to unblock WiFi devices" 1
+        else
+            logger "✓ No wireless devices blocked by rfkill" 1
+        fi
+    fi
+    
+    logger "✓ Pre-flight checks completed" 1
+    logger "================================" 1
+    return 0
+}
+
+# Run pre-flight checks
+if ! preflight_checks; then
+    logger "Pre-flight checks failed, cannot continue" 0
+    exit 1
+fi
+
 # Diagnostic information
 logger "=== System Diagnostics ===" 1
 logger "Home Assistant Access Point v0.6.1" 1
@@ -143,15 +188,48 @@ if ! ip link show $INTERFACE >/dev/null 2>&1; then
     exit 1
 fi
 
-# Check if interface supports wireless
+# Check if interface supports wireless and can do AP mode
+logger "=== Wireless Interface Validation ===" 1
 if ! iw dev $INTERFACE info >/dev/null 2>&1; then
     logger "Error: Interface $INTERFACE does not appear to be a wireless interface!" 0
-    logger "Wireless interfaces detected:" 0
-    iw dev 2>/dev/null | grep Interface | awk '{print $2}' | while read wiface; do
-        logger "  - $wiface" 0
-    done || logger "  No wireless interfaces found" 0
+    logger "Available wireless interfaces:" 0
+    if command -v iw >/dev/null 2>&1; then
+        available_interfaces=$(iw dev 2>/dev/null | grep Interface | awk '{print $2}')
+        if [ -n "$available_interfaces" ]; then
+            echo "$available_interfaces" | while read wiface; do
+                logger "  - $wiface" 0
+                # Check capabilities of each interface
+                iw phy$(iw dev $wiface info | grep wiphy | awk '{print $2}') info 2>/dev/null | grep -A 10 "Supported interface modes:" | grep -q "AP" && logger "    (supports AP mode)" 0 || logger "    (does not support AP mode)" 0
+            done
+        else
+            logger "  No wireless interfaces found!" 0
+        fi
+    else
+        logger "  iw command not available" 0
+    fi
+    logger "Please check your configuration and set 'interface' to a valid wireless interface" 0
     exit 1
 fi
+
+# Check if interface supports AP mode
+logger "Checking if $INTERFACE supports AP mode..." 1
+phy_device=$(iw dev $INTERFACE info | grep wiphy | awk '{print $2}')
+if iw phy phy$phy_device info 2>/dev/null | grep -A 10 "Supported interface modes:" | grep -q "AP"; then
+    logger "✓ Interface $INTERFACE supports AP mode" 1
+else
+    logger "Error: Interface $INTERFACE does not support AP mode!" 0
+    logger "This interface cannot create a WiFi access point" 0
+    exit 1
+fi
+
+# Check if interface is already in use
+current_mode=$(iw dev $INTERFACE info 2>/dev/null | grep type | awk '{print $2}')
+if [ "$current_mode" != "managed" ] && [ "$current_mode" != "monitor" ]; then
+    logger "Warning: Interface $INTERFACE is in '$current_mode' mode" 1
+fi
+
+logger "✓ Wireless interface validation passed" 1
+logger "=====================================" 1
 
 logger "Interface $INTERFACE validated successfully" 1
 
@@ -172,15 +250,30 @@ ip link set $INTERFACE up
 # Setup signal handlers
 trap 'term_handler' SIGTERM
 
-# Enforces required env variables
+# Enforces required env variables and validate them
+logger "=== Configuration Validation ===" 1
 required_vars=(ssid wpa_passphrase channel address netmask broadcast)
 for required_var in "${required_vars[@]}"; do
     bashio::config.require $required_var "An AP cannot be created without this information"
+    eval "var_value=\$$(echo $required_var | tr '[:lower:]' '[:upper:]')"
+    logger "$required_var: $var_value" 1
 done
 
+if [ -z "$SSID" ] || [ -z "$WPA_PASSPHRASE" ]; then
+    logger "Error: SSID and WPA_PASSPHRASE are required but empty!" 0
+    logger "Please configure your add-on with:" 0
+    logger "  - ssid: Your WiFi Network Name" 0
+    logger "  - wpa_passphrase: Your WiFi Password (8+ characters)" 0
+    bashio::exit.nok "Missing required WiFi configuration!"
+fi
+
 if [ ${#WPA_PASSPHRASE} -lt 8 ] ; then
+    logger "Error: WPA password is only ${#WPA_PASSPHRASE} characters long!" 0
     bashio::exit.nok "The WPA password must be at least 8 characters long!"
 fi
+
+logger "✓ Configuration validation passed" 1
+logger "=================================" 1
 
 # Setup hostapd.conf
 logger "# Setup hostapd:" 1
@@ -438,20 +531,31 @@ fi
 logger "## Starting hostapd daemon" 1
 
 # Show final hostapd configuration for debugging
-if [ $DEBUG -gt 0 ]; then
-    logger "Final hostapd configuration:" 1
-    cat /hostapd.conf | while read line; do logger "  $line" 1; done
-fi
+logger "=== hostapd Configuration ===" 1
+logger "Final hostapd configuration:" 1
+cat /hostapd.conf | while read line; do logger "  $line" 1; done
+logger "=============================" 1
 
 # Verify hostapd configuration before starting
 logger "Validating hostapd configuration..." 1
-if ! hostapd -t /hostapd.conf 2>&1; then
-    logger "Error: hostapd configuration validation failed" 0
+hostapd_validation=$(hostapd -t /hostapd.conf 2>&1)
+if [ $? -ne 0 ]; then
+    logger "Error: hostapd configuration validation failed!" 0
+    logger "Validation output:" 0
+    echo "$hostapd_validation" | while read line; do logger "  $line" 0; done
     logger "Configuration file contents:" 0
-    cat /hostapd.conf
+    cat /hostapd.conf | while read line; do logger "  $line" 0; done
+    
+    # Common troubleshooting tips
+    logger "=== Troubleshooting Tips ===" 0
+    logger "1. Check if the wireless interface name is correct" 0
+    logger "2. Verify the channel is supported by your WiFi adapter" 0
+    logger "3. Make sure no other process is using the interface" 0
+    logger "4. Try a different channel (1, 6, or 11 are common)" 0
+    logger "============================" 0
     exit 1
 fi
-logger "hostapd configuration validation passed" 1
+logger "✓ hostapd configuration validation passed" 1
 
 # Ensure interface is ready for hostapd
 logger "Preparing interface $INTERFACE for hostapd..." 1
@@ -474,18 +578,46 @@ if [ $DEBUG -gt 1 ]; then
     wait ${HOSTAPD_PID}
 else
     logger "Starting hostapd daemon" 1
+    
+    # Start hostapd and capture any immediate errors
     hostapd /hostapd.conf &
     HOSTAPD_PID=$!
     logger "hostapd started with PID: $HOSTAPD_PID" 1
     
-    # Give hostapd a moment to start and check if it's running
-    sleep 3
-    if ! kill -0 $HOSTAPD_PID 2>/dev/null; then
-        logger "Error: hostapd failed to start or crashed immediately" 0
-        logger "Check the hostapd logs above for errors" 0
-        exit 1
+    # Give hostapd progressive time to start and monitor it
+    local check_count=0
+    local max_checks=10
+    while [ $check_count -lt $max_checks ]; do
+        sleep 1
+        check_count=$((check_count + 1))
+        
+        if ! kill -0 $HOSTAPD_PID 2>/dev/null; then
+            logger "Error: hostapd process (PID: $HOSTAPD_PID) has died!" 0
+            logger "This usually means:" 0
+            logger "  1. Wrong interface name or interface not available" 0
+            logger "  2. Interface is busy/in use by another process" 0
+            logger "  3. Channel not supported by the wireless adapter" 0
+            logger "  4. Invalid hostapd configuration" 0
+            logger "Check logs above for specific error messages" 0
+            exit 1
+        fi
+        
+        # Check if hostapd has successfully enabled the AP
+        if iw dev $INTERFACE info 2>/dev/null | grep -q "type AP"; then
+            logger "✓ hostapd successfully enabled AP mode on $INTERFACE" 1
+            break
+        fi
+        
+        if [ $check_count -eq 5 ]; then
+            logger "hostapd is running but AP mode not yet active, waiting..." 1
+        fi
+    done
+    
+    if [ $check_count -eq $max_checks ]; then
+        logger "Warning: hostapd is running but AP mode verification timed out" 1
+    else
+        logger "✓ hostapd appears to be running successfully" 1
     fi
-    logger "hostapd appears to be running successfully" 1
     
     # Wait a bit for hostapd to fully initialize, then configure IP
     sleep 3
