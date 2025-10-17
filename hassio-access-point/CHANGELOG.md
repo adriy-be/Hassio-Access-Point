@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.12] - 2025-10-17
+### Fixed
+- **Critical**: Added comprehensive debugging to identify exact failure point
+- Fixed dnsmasq configuration test output capture to prevent script confusion
+- Added exit trap to show exactly where script terminates unexpectedly
+- Enhanced logging around interface IP checking and configuration
+
+### Added
+- Debug logging to track script execution flow
+- Better error capture for dnsmasq configuration testing
+- Exit trap to identify unexpected script termination points
+
 ## [0.6.11] - 2025-10-17
 ### Fixed
 - **Critical**: Fixed script crash when interface IP configuration fails

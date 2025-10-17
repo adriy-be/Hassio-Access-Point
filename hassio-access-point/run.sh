@@ -1,5 +1,8 @@
 #!/usr/bin/with-contenv bashio
 
+# Enable debugging for unexpected exits
+trap 'logger "DEBUG: Script exiting at line $LINENO with exit code $?" 1' EXIT
+
 # SIGTERM-handler this function will be executed when the container receives the SIGTERM signal (when stopping)
 term_handler(){
 	logger "Stopping Home Assistant Access Point" 0
@@ -521,14 +524,25 @@ if $(bashio::config.true "dhcp"); then
     fi
     
     # Test dnsmasq configuration
-    if dnsmasq --test -C /dnsmasq.conf 2>&1; then
-        logger "dnsmasq configuration test passed" 1
+    logger "Testing dnsmasq configuration..." 1
+    dnsmasq_test_output=$(dnsmasq --test -C /dnsmasq.conf 2>&1)
+    dnsmasq_test_result=$?
+    logger "dnsmasq test output: $dnsmasq_test_output" 1
+    if [ $dnsmasq_test_result -eq 0 ]; then
+        logger "✓ dnsmasq configuration test passed" 1
     else
-        logger "Warning: dnsmasq configuration test failed" 1
+        logger "⚠ Warning: dnsmasq configuration test failed (exit code: $dnsmasq_test_result)" 1
+        logger "dnsmasq may still work, continuing..." 1
     fi
     
+    # Debug: Show where we are in the script
+    logger "=== DEBUG: About to check interface IP ===" 1
+    
     # Verify interface has IP before starting dnsmasq
+    logger "Checking interface $INTERFACE for IP address..." 1
     interface_ip=$(ip addr show $INTERFACE | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
+    logger "Interface IP check result: '$interface_ip'" 1
+    
     if [ -z "$interface_ip" ]; then
         logger "Warning: Interface $INTERFACE has no IP address for DHCP!" 0
         logger "Attempting to configure IP address again..." 1
