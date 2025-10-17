@@ -155,6 +155,10 @@ fi
 
 logger "Interface $INTERFACE validated successfully" 1
 
+# Show current interface status before configuration
+logger "Current interface status before configuration:" 1
+ip addr show $INTERFACE | while read line; do logger "  $line" 1; done
+
 logger "Add to /etc/network/interfaces: address $ADDRESS" 1
 echo "address $ADDRESS"$'\n' >> /etc/network/interfaces
 logger "Add to /etc/network/interfaces: netmask $NETMASK" 1
@@ -223,11 +227,7 @@ else
 fi
 
 
-# Set address for the selected interface. Not sure why this is now not being set via /etc/network/interfaces, but maybe interfaces file is no longer required...
-logger "Setting IP address for interface $INTERFACE" 1
-
-# Convert netmask to CIDR notation for modern ip command
-# Function to convert netmask to CIDR
+# Function to convert netmask to CIDR notation for modern ip command
 netmask_to_cidr() {
     local netmask=$1
     local cidr=0
@@ -251,13 +251,45 @@ netmask_to_cidr() {
     echo $cidr
 }
 
-CIDR=$(netmask_to_cidr "$NETMASK")
-
-if ! ifconfig $INTERFACE $ADDRESS netmask $NETMASK broadcast $BROADCAST 2>/dev/null; then
-    logger "Warning: Failed to set IP address via ifconfig, trying ip command" 1
-    ip addr add $ADDRESS/$CIDR dev $INTERFACE broadcast $BROADCAST
+# Function to configure interface IP address
+configure_interface_ip() {
+    logger "Configuring IP address for interface $INTERFACE" 1
+    
+    # First flush any existing IP addresses
+    ip addr flush dev $INTERFACE 2>/dev/null || true
+    
+    local CIDR=$(netmask_to_cidr "$NETMASK")
+    logger "Using CIDR: /$CIDR for netmask $NETMASK" 1
+    
+    # Try to set IP using ip command (modern approach)
+    if ip addr add $ADDRESS/$CIDR dev $INTERFACE broadcast $BROADCAST 2>/dev/null; then
+        logger "Successfully set IP address using ip command" 1
+    else
+        logger "ip command failed, trying ifconfig..." 1
+        if ifconfig $INTERFACE $ADDRESS netmask $NETMASK broadcast $BROADCAST 2>/dev/null; then
+            logger "Successfully set IP address using ifconfig" 1
+        else
+            logger "Error: Failed to set IP address with both ip and ifconfig!" 0
+            return 1
+        fi
+    fi
+    
+    # Ensure interface is up
     ip link set $INTERFACE up
-fi
+    
+    # Verify IP was set correctly
+    sleep 1
+    local current_ip=$(ip addr show $INTERFACE | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
+    if [ "$current_ip" = "$ADDRESS" ]; then
+        logger "✓ IP address $ADDRESS successfully configured on $INTERFACE" 1
+        return 0
+    else
+        logger "Error: IP verification failed. Expected: $ADDRESS, Got: $current_ip" 0
+        return 1
+    fi
+}
+
+# Configure IP - this will be called later after hostapd setup
 
 # Add interface to hostapd.conf
 logger "Add to hostapd.conf: interface=$INTERFACE" 1
@@ -371,17 +403,33 @@ if $(bashio::config.true "dhcp"); then
         logger "Warning: dnsmasq configuration test failed" 1
     fi
     
+    # Verify interface has IP before starting dnsmasq
+    local interface_ip=$(ip addr show $INTERFACE | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
+    if [ -z "$interface_ip" ]; then
+        logger "Error: Interface $INTERFACE has no IP address for DHCP!" 0
+        exit 1
+    fi
+    logger "Interface $INTERFACE has IP $interface_ip, starting dnsmasq..." 1
+    
     # Start dnsmasq in background
     dnsmasq -C /dnsmasq.conf &
     DNSMASQ_PID=$!
     logger "dnsmasq started with PID: $DNSMASQ_PID" 1
     
-    # Give dnsmasq a moment to start
-    sleep 2
+    # Give dnsmasq a moment to start and verify it's running
+    sleep 3
     if ! kill -0 $DNSMASQ_PID 2>/dev/null; then
-        logger "Warning: dnsmasq may have failed to start" 1
+        logger "Error: dnsmasq failed to start or crashed!" 0
+        logger "DHCP will not work. Check dnsmasq configuration above." 0
+        # Don't exit here, AP might still work without DHCP
     else
-        logger "dnsmasq appears to be running" 1
+        logger "✓ dnsmasq appears to be running and DHCP should be available" 1
+        # Try to verify dnsmasq is listening
+        if netstat -ul | grep -q ":67 "; then
+            logger "✓ dnsmasq is listening on DHCP port 67" 1
+        else
+            logger "⚠ Warning: dnsmasq may not be listening on DHCP port" 1
+        fi
     fi
 else
     logger "## DHCP disabled, skipping dnsmasq" 1
@@ -439,8 +487,17 @@ else
     fi
     logger "hostapd appears to be running successfully" 1
     
-    # Wait a bit then check if AP is actually broadcasting
-    sleep 5
+    # Wait a bit for hostapd to fully initialize, then configure IP
+    sleep 3
+    logger "Configuring interface IP address now that hostapd is running..." 1
+    if ! configure_interface_ip; then
+        logger "Error: Failed to configure IP address, stopping..." 0
+        kill $HOSTAPD_PID 2>/dev/null || true
+        exit 1
+    fi
+    
+    # Wait a bit more then check if AP is actually broadcasting
+    sleep 2
     logger "Checking if access point is broadcasting..." 1
     if command -v iw >/dev/null 2>&1; then
         if iw dev $INTERFACE info | grep -q "type AP"; then
@@ -449,10 +506,25 @@ else
             logger "⚠ Warning: Interface $INTERFACE may not be in AP mode" 1
         fi
         
-        # Try to scan for our own SSID (this might not work from the same interface)
+        # Show interface status for debugging
         logger "Interface status:" 1
         iw dev $INTERFACE info | while read line; do logger "  $line" 1; done
+        
+        # Show IP configuration
+        logger "IP configuration:" 1
+        ip addr show $INTERFACE | grep "inet " | while read line; do logger "  $line" 1; done
     fi
+    
+    # Final status check before entering wait loop
+    logger "=== Final Status Check ===" 1
+    logger "hostapd PID: $HOSTAPD_PID" 1
+    if [ -n "$DNSMASQ_PID" ]; then
+        logger "dnsmasq PID: $DNSMASQ_PID" 1
+    fi
+    logger "Interface IP: $(ip addr show $INTERFACE | grep 'inet ' | awk '{print $2}')" 1
+    logger "Access Point should be available at: $ADDRESS" 1
+    logger "SSID: $SSID" 1
+    logger "=========================" 1
     
     wait ${HOSTAPD_PID}
 fi

@@ -21,7 +21,8 @@ apk add --no-cache \
     iptables \
     ip6tables \
     iproute2 \
-    gawk && \
+    gawk \
+    netstat-nat && \
 rm -rf /var/cache/apk/*
 
 COPY hostapd.conf /

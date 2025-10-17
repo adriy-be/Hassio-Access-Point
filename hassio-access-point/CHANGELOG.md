@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.6.3] - 2025-10-17
+
+### Fixed
+- **Critical Networking Issue**: Fixed IP address configuration timing that prevented devices from accessing the web interface
+- **DHCP Server Binding**: Improved dnsmasq startup to ensure it binds to the interface after IP configuration
+- **Interface IP Validation**: Added comprehensive IP address validation and verification
+- **Service Dependencies**: Fixed startup sequence to configure IP after hostapd initialization
+
+### Added
+- **IP Configuration Function**: Centralized interface IP configuration with multiple fallback methods
+- **Network Status Verification**: Added checks to verify services are actually listening on correct ports
+- **Enhanced IP Diagnostics**: Better logging of interface IP status throughout startup
+- **Service Status Monitoring**: Added PID tracking and validation for all network services
+
+### Changed
+- **Startup Sequence**: Improved timing of IP configuration, hostapd, and dnsmasq startup
+- **Error Handling**: Better error messages when network configuration fails
+- **Service Validation**: Added verification that dnsmasq successfully binds to DHCP port
+
 ## [0.6.2] - 2025-10-17
 
 ### Added
