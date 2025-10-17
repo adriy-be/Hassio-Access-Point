@@ -351,7 +351,7 @@ configure_interface_ip() {
     # First flush any existing IP addresses
     ip addr flush dev $INTERFACE 2>/dev/null || true
     
-    local CIDR=$(netmask_to_cidr "$NETMASK")
+    CIDR=$(netmask_to_cidr "$NETMASK")
     logger "Using CIDR: /$CIDR for netmask $NETMASK" 1
     
     # Try to set IP using ip command (modern approach)
@@ -372,7 +372,7 @@ configure_interface_ip() {
     
     # Verify IP was set correctly
     sleep 1
-    local current_ip=$(ip addr show $INTERFACE | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
+    current_ip=$(ip addr show $INTERFACE | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
     if [ "$current_ip" = "$ADDRESS" ]; then
         logger "✓ IP address $ADDRESS successfully configured on $INTERFACE" 1
         return 0
@@ -497,7 +497,7 @@ if $(bashio::config.true "dhcp"); then
     fi
     
     # Verify interface has IP before starting dnsmasq
-    local interface_ip=$(ip addr show $INTERFACE | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
+    interface_ip=$(ip addr show $INTERFACE | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
     if [ -z "$interface_ip" ]; then
         logger "Error: Interface $INTERFACE has no IP address for DHCP!" 0
         exit 1
@@ -585,8 +585,8 @@ else
     logger "hostapd started with PID: $HOSTAPD_PID" 1
     
     # Give hostapd progressive time to start and monitor it
-    local check_count=0
-    local max_checks=10
+    check_count=0
+    max_checks=10
     while [ $check_count -lt $max_checks ]; do
         sleep 1
         check_count=$((check_count + 1))

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.6] - 2025-10-17
+### Fixed
+- Fixed bash syntax error where `local` variables were declared outside function scope
+- Script now runs without syntax errors while maintaining WiFi AP functionality
+
 ## [0.6.5] - 2025-10-17
 
 ### Added
