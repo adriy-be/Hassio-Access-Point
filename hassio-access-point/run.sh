@@ -88,15 +88,22 @@ preflight_checks() {
     
     # Check for RF kill blocks
     if command -v rfkill >/dev/null 2>&1; then
-        blocked_devices=$(rfkill list | grep -E "(Wireless LAN|WiFi)" | grep "blocked: yes" || true)
-        if [ -n "$blocked_devices" ]; then
+        # Try to access rfkill, handle permission errors gracefully
+        blocked_devices=$(rfkill list 2>/dev/null | grep -E "(Wireless LAN|WiFi)" | grep "blocked: yes" || true)
+        rfkill_status=$?
+        
+        if [ $rfkill_status -ne 0 ]; then
+            logger "Warning: Cannot access rfkill (insufficient permissions) - continuing anyway" 1
+        elif [ -n "$blocked_devices" ]; then
             logger "Warning: Some wireless devices are blocked by rfkill:" 1
             echo "$blocked_devices" | while read line; do logger "  $line" 1; done
             logger "Attempting to unblock..." 1
-            rfkill unblock wifi || logger "Failed to unblock WiFi devices" 1
+            rfkill unblock wifi 2>/dev/null || logger "Failed to unblock WiFi devices (insufficient permissions)" 1
         else
             logger "✓ No wireless devices blocked by rfkill" 1
         fi
+    else
+        logger "Warning: rfkill command not available - skipping RF kill check" 1
     fi
     
     logger "✓ Pre-flight checks completed" 1
@@ -155,7 +162,8 @@ logger "Run command: nmcli dev set $INTERFACE managed no" 1
 # Check if NetworkManager is available and interface exists
 if command -v nmcli >/dev/null 2>&1; then
     # Check for NetworkManager version mismatch and try to handle it
-    if nmcli --version 2>/dev/null | grep -q "Warning.*versions don't match"; then
+    nm_version_check=$(nmcli --version 2>&1 || true)
+    if echo "$nm_version_check" | grep -q "Warning.*versions don't match"; then
         logger "Warning: NetworkManager version mismatch detected, attempting restart..." 1
         # Try to restart NetworkManager if possible
         systemctl restart NetworkManager 2>/dev/null || service NetworkManager restart 2>/dev/null || true
@@ -568,6 +576,15 @@ if pgrep -f "hostapd.*$INTERFACE" >/dev/null; then
     pkill -f "hostapd.*$INTERFACE" 2>/dev/null || true
     sleep 2
 fi
+
+# Final pre-hostapd diagnostics
+logger "=== Pre-hostapd Interface Status ===" 1
+logger "Interface: $INTERFACE" 1
+logger "Interface status: $(ip link show $INTERFACE 2>/dev/null | head -1 || echo 'NOT FOUND')" 1
+logger "IP configuration: $(ip addr show $INTERFACE 2>/dev/null | grep inet || echo 'NO IP')" 1
+logger "Wireless capabilities: $(iw $INTERFACE info 2>/dev/null | grep -E 'wiphy|type|channel' || echo 'NO WIRELESS INFO')" 1
+logger "hostapd config check: $(hostapd -t /hostapd.conf 2>&1 || echo 'CONFIG INVALID')" 1
+logger "===================================" 1
 
 # If debug level is greater than 1, start hostapd in debug mode
 if [ $DEBUG -gt 1 ]; then

@@ -1,9 +1,21 @@
 # Changelog
 
+## [0.6.7] - 2025-10-17
+### Fixed
+- Version bump to 0.6.7 with all accumulated fixes
+
 ## [0.6.6] - 2025-10-17
 ### Fixed
 - Fixed bash syntax error where `local` variables were declared outside function scope
+- Improved rfkill error handling to gracefully handle permission denied errors
+- Enhanced NetworkManager version mismatch detection to capture stderr warnings
+- Added comprehensive pre-hostapd diagnostics for better troubleshooting
 - Script now runs without syntax errors while maintaining WiFi AP functionality
+
+### Added
+- Enhanced diagnostics before hostapd startup showing interface status, IP config, and wireless capabilities
+- Better error handling for rfkill access when insufficient Docker privileges exist
+- Improved NetworkManager version compatibility checking
 
 ## [0.6.5] - 2025-10-17
 
