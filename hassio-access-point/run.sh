@@ -498,7 +498,12 @@ fi
 
 # Enable IP forwarding for proper routing
 logger "Enabling IP forwarding" 1
-echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null || true
+if ! echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null; then
+    logger "Warning: Cannot write to /proc/sys/net/ipv4/ip_forward (read-only filesystem)" 1
+    logger "IP forwarding may already be enabled by the host system" 1
+    current_forward=$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || echo "unknown")
+    logger "Current ip_forward value: $current_forward" 1
+fi
 
 # Add basic routing rule to allow WiFi clients to reach the host
 logger "Setting up basic routing for WiFi clients" 1
@@ -525,10 +530,21 @@ if $(bashio::config.true "dhcp"); then
     # Verify interface has IP before starting dnsmasq
     interface_ip=$(ip addr show $INTERFACE | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
     if [ -z "$interface_ip" ]; then
-        logger "Error: Interface $INTERFACE has no IP address for DHCP!" 0
-        exit 1
+        logger "Warning: Interface $INTERFACE has no IP address for DHCP!" 0
+        logger "Attempting to configure IP address again..." 1
+        # Try to configure the interface IP again
+        configure_interface_ip "$ADDRESS" "$NETMASK" "$BROADCAST" "$INTERFACE"
+        # Check again after configuration attempt
+        interface_ip=$(ip addr show $INTERFACE | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
+        if [ -z "$interface_ip" ]; then
+            logger "Error: Still no IP address on $INTERFACE after retry. DHCP may not work properly." 0
+            logger "Continuing anyway - AP might still work without DHCP..." 1
+        else
+            logger "✓ IP address configured after retry: $interface_ip" 1
+        fi
+    else
+        logger "Interface $INTERFACE has IP $interface_ip, starting dnsmasq..." 1
     fi
-    logger "Interface $INTERFACE has IP $interface_ip, starting dnsmasq..." 1
     
     # Check what might be using DHCP/DNS ports before starting dnsmasq
     logger "=== Pre-dnsmasq Port Diagnostics ===" 1

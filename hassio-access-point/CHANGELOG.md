@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.11] - 2025-10-17
+### Fixed
+- **Critical**: Fixed script crash when interface IP configuration fails
+- Fixed IP forwarding error on read-only filesystem (Docker containers)
+- Replaced fatal exit with warning and retry logic when interface has no IP
+- Added retry mechanism for interface IP configuration
+- Script now continues even if IP configuration partially fails
+
+### Changed
+- IP forwarding failure now shows warning instead of causing script failure
+- Interface IP check is now non-fatal with retry logic
+- Better error handling for Docker container filesystem limitations
+
 ## [0.6.10] - 2025-10-17
 ### Fixed
 - **Critical**: Fixed dnsmasq startup failure that prevented DHCP from working
