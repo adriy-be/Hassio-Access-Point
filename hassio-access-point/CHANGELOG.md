@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.13] - 2025-10-17
+### Fixed
+- **Critical**: Added immediate SSID and password validation to catch configuration issues
+- Enhanced hostapd startup logging to show exactly when and how WiFi access point starts
+- Added comprehensive hostapd.conf content logging for troubleshooting
+- Added checkpoint markers to track script execution flow to wait phase
+
+### Added
+- Early configuration validation with clear error messages for missing SSID/password
+- Detailed hostapd startup process logging
+- Script execution phase markers to identify where failures occur
+- Enhanced configuration display showing SSID and password lengths
+
 ## [0.6.12] - 2025-10-17
 ### Fixed
 - **Critical**: Added comprehensive debugging to identify exact failure point

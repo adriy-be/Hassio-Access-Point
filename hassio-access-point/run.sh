@@ -124,12 +124,29 @@ fi
 
 # Diagnostic information
 logger "=== System Diagnostics ===" 1
-logger "Home Assistant Access Point v0.6.1" 1
+logger "Home Assistant Access Point v0.6.12" 1
 logger "Debug level: $DEBUG" 1
 logger "Interface: $INTERFACE" 1
-logger "SSID: $SSID" 1
+logger "SSID: '$SSID'" 1
+logger "SSID length: ${#SSID}" 1
+logger "WPA_PASSPHRASE length: ${#WPA_PASSPHRASE}" 1
 logger "Channel: $CHANNEL" 1
 logger "Address: $ADDRESS" 1
+
+# Critical configuration check
+if [ -z "$SSID" ]; then
+    logger "CRITICAL ERROR: SSID is empty! Please configure the addon with your WiFi network name." 0
+    logger "Go to the addon configuration and set 'ssid' to your desired WiFi network name." 0
+    exit 1
+fi
+
+if [ -z "$WPA_PASSPHRASE" ]; then
+    logger "CRITICAL ERROR: WPA_PASSPHRASE is empty! Please configure the addon with your WiFi password." 0
+    logger "Go to the addon configuration and set 'wpa_passphrase' to your desired WiFi password (8+ chars)." 0
+    exit 1
+fi
+
+logger "✓ Basic configuration appears valid" 1
 
 # Check NetworkManager version
 if command -v nmcli >/dev/null 2>&1; then
@@ -670,12 +687,21 @@ if [ $DEBUG -gt 1 ]; then
     logger "hostapd started with PID: $HOSTAPD_PID" 1
     wait ${HOSTAPD_PID}
 else
-    logger "Starting hostapd daemon" 1
+    logger "=== STARTING HOSTAPD DAEMON ===" 1
+    logger "About to start hostapd with config: /hostapd.conf" 1
+    
+    # Show the actual hostapd config if debug enabled
+    if [ $DEBUG -gt 0 ]; then
+        logger "hostapd.conf contents:" 1
+        cat /hostapd.conf | while read line; do logger "  $line" 1; done
+    fi
     
     # Start hostapd and capture any immediate errors
+    logger "Executing: hostapd /hostapd.conf &" 1
     hostapd /hostapd.conf &
     HOSTAPD_PID=$!
     logger "hostapd started with PID: $HOSTAPD_PID" 1
+    logger "Waiting for hostapd to initialize..." 1
     
     # Give hostapd progressive time to start and monitor it
     check_count=0
@@ -750,6 +776,9 @@ else
     logger "Access Point should be available at: $ADDRESS" 1
     logger "SSID: $SSID" 1
     logger "=========================" 1
+    logger "=== SCRIPT REACHED WAIT PHASE ===" 1
+    logger "About to wait for hostapd PID: $HOSTAPD_PID" 1
+    logger "If script stops here, hostapd is running in background" 1
     
     wait ${HOSTAPD_PID}
 fi
