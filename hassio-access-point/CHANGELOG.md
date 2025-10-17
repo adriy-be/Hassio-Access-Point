@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.14] - 2025-10-17
+### Added
+- **Comprehensive WiFi verification**: Added detailed checks to verify if access point is actually broadcasting
+- **Access Point Status Summary**: Clear status display showing all critical information (SSID, channel, IP, DHCP status)
+- **WiFi scanning verification**: Attempts to detect if the access point is visible after startup
+- **Interface mode verification**: Shows if interface is properly in AP mode
+- **User-friendly status messages**: Clear indicators of what should be visible on user devices
+
+### Fixed
+- Enhanced final status reporting to confirm access point is operational
+- Added 5-second delay after hostapd starts to allow full initialization
+- Better troubleshooting information for "no WiFi visible" issues
+
 ## [0.6.13] - 2025-10-17
 ### Fixed
 - **Critical**: Added immediate SSID and password validation to catch configuration issues

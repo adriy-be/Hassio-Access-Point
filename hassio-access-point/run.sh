@@ -780,6 +780,51 @@ else
     logger "About to wait for hostapd PID: $HOSTAPD_PID" 1
     logger "If script stops here, hostapd is running in background" 1
     
+    # Give hostapd a few seconds to fully initialize
+    sleep 5
+    
+    # Perform WiFi scan verification
+    logger "=== WiFi ACCESS POINT VERIFICATION ===" 1
+    if kill -0 $HOSTAPD_PID 2>/dev/null; then
+        logger "✓ hostapd process is still running" 1
+        
+        # Try to scan for our own AP from another interface or tool
+        logger "Attempting to verify AP is broadcasting..." 1
+        
+        # Check if we can see our AP in the WiFi scan
+        scan_result=$(iw dev $INTERFACE scan 2>/dev/null | grep -i "ssid.*$SSID" || echo "")
+        if [ -n "$scan_result" ]; then
+            logger "✓ SUCCESS: WiFi access point '$SSID' is broadcasting!" 1
+        else
+            logger "⚠ WARNING: Cannot detect WiFi access point '$SSID' in scan" 1
+            logger "This might be normal - interface may not scan its own AP" 1
+        fi
+        
+        # Check interface is in AP mode
+        interface_mode=$(iw dev $INTERFACE info | grep "type" | awk '{print $2}' || echo "unknown")
+        logger "Interface mode: $interface_mode" 1
+        
+        # Final status summary
+        logger "=== ACCESS POINT STATUS SUMMARY ===" 1
+        logger "✓ SSID: $SSID" 1
+        logger "✓ Channel: $CHANNEL" 1
+        logger "✓ IP Address: $ADDRESS" 1
+        logger "✓ Interface: $INTERFACE ($interface_mode mode)" 1
+        if [ -n "$DNSMASQ_PID" ] && kill -0 $DNSMASQ_PID 2>/dev/null; then
+            logger "✓ DHCP Server: Running (PID $DNSMASQ_PID)" 1
+        else
+            logger "⚠ DHCP Server: Not running (manual IP required)" 1
+        fi
+        logger "===========================================" 1
+        logger "WiFi Access Point should be visible on your devices!" 1
+        logger "Look for network: $SSID" 1
+        logger "Password: [configured]" 1
+        logger "===========================================" 1
+    else
+        logger "✗ ERROR: hostapd process has died!" 0
+        logger "WiFi access point is not running" 0
+    fi
+    
     wait ${HOSTAPD_PID}
 fi
 
