@@ -8,12 +8,8 @@ term_handler(){
 		iptables-nft -t nat -D POSTROUTING -o $DEFAULT_ROUTE_INTERFACE -j MASQUERADE 2>/dev/null || true
 		iptables-nft -P FORWARD DROP 2>/dev/null || true
 	fi
-	# Clean up Home Assistant access rules
-	iptables-nft -D INPUT -i $INTERFACE -p tcp --dport 8123 -j ACCEPT 2>/dev/null || true
-	iptables-nft -D INPUT -i $INTERFACE -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
-	iptables-nft -D INPUT -i $INTERFACE -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
-	iptables-nft -D INPUT -i $INTERFACE -p udp --dport 53 -j ACCEPT 2>/dev/null || true
-	iptables-nft -D INPUT -i $INTERFACE -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
+	# Clean up WiFi access rules
+	iptables-nft -D INPUT -i $INTERFACE -j ACCEPT 2>/dev/null || true
 	# Clean up network interface
 	ifdown $INTERFACE 2>/dev/null || true
 	ip link set $INTERFACE down 2>/dev/null || true
@@ -442,19 +438,26 @@ if $(bashio::config.true "dhcp"); then
 
             if [ ${#dns_array[@]} -eq 0 ]; then
                 logger "Couldn't get DNS servers from host. Consider setting with 'client_dns_override' config option." 0
-                # Use Google DNS as last resort
-                dns_array=("8.8.8.8" "8.8.4.4")
-                logger "Using Google DNS servers as last resort" 1
+                # Use Google DNS as last resort but don't add it if we might have DNS conflicts
+                logger "Skipping DNS configuration to avoid conflicts with port=0 setting" 1
             else
+                # Only add DNS servers if we have them and they're valid
                 dns_string="dhcp-option=6"
+                valid_dns_count=0
                 for dns_entry in "${dns_array[@]}"; do
                     # Validate IP address format
                     if [[ $dns_entry =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
                         dns_string+=",$dns_entry"
+                        valid_dns_count=$((valid_dns_count + 1))
                     fi
                 done
-                echo "$dns_string"$'\n' >> /dnsmasq.conf
-                logger "Add DNS: $dns_string" 0
+                
+                if [ $valid_dns_count -gt 0 ]; then
+                    echo "$dns_string"$'\n' >> /dnsmasq.conf
+                    logger "Add DNS: $dns_string" 0
+                else
+                    logger "No valid DNS servers found, skipping DNS configuration" 1
+                fi
             fi
 
         fi
@@ -493,17 +496,14 @@ if $(bashio::config.true "client_internet_access"); then
     fi
 fi
 
-# Always allow access to Home Assistant from WiFi clients
-logger "Setting up iptables rules for Home Assistant access" 1
-# Allow WiFi clients to reach Home Assistant on port 8123
-iptables-nft -I INPUT -i $INTERFACE -p tcp --dport 8123 -j ACCEPT 2>/dev/null || true
-# Allow WiFi clients to reach Home Assistant on port 80 (if used)
-iptables-nft -I INPUT -i $INTERFACE -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
-# Allow WiFi clients to reach Home Assistant on port 443 (if HTTPS is used)
-iptables-nft -I INPUT -i $INTERFACE -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
-# Allow DNS queries from WiFi clients
-iptables-nft -I INPUT -i $INTERFACE -p udp --dport 53 -j ACCEPT 2>/dev/null || true
-iptables-nft -I INPUT -i $INTERFACE -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
+# Enable IP forwarding for proper routing
+logger "Enabling IP forwarding" 1
+echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null || true
+
+# Add basic routing rule to allow WiFi clients to reach the host
+logger "Setting up basic routing for WiFi clients" 1
+# Allow traffic from WiFi interface to reach local services
+iptables-nft -A INPUT -i $INTERFACE -j ACCEPT 2>/dev/null || true
 
 # Start dnsmasq if DHCP is enabled in config
 if $(bashio::config.true "dhcp"); then
@@ -530,8 +530,24 @@ if $(bashio::config.true "dhcp"); then
     fi
     logger "Interface $INTERFACE has IP $interface_ip, starting dnsmasq..." 1
     
-    # Start dnsmasq in background
-    dnsmasq -C /dnsmasq.conf &
+    # Check what might be using DHCP/DNS ports before starting dnsmasq
+    logger "=== Pre-dnsmasq Port Diagnostics ===" 1
+    dhcp_conflicts=$(netstat -ul 2>/dev/null | grep ":67 " || true)
+    dns_conflicts=$(netstat -ul 2>/dev/null | grep ":53 " || true)
+    
+    if [ -n "$dhcp_conflicts" ]; then
+        logger "Warning: Port 67 (DHCP) appears to be in use:" 1
+        logger "$dhcp_conflicts" 1
+    fi
+    
+    if [ -n "$dns_conflicts" ]; then
+        logger "Warning: Port 53 (DNS) appears to be in use:" 1
+        logger "$dns_conflicts" 1
+    fi
+    
+    # Try to start dnsmasq with verbose logging to capture any errors
+    logger "Starting dnsmasq with enhanced error logging..." 1
+    dnsmasq_log=$(dnsmasq -C /dnsmasq.conf --log-facility=- 2>&1 &)
     DNSMASQ_PID=$!
     logger "dnsmasq started with PID: $DNSMASQ_PID" 1
     
@@ -540,7 +556,19 @@ if $(bashio::config.true "dhcp"); then
     if ! kill -0 $DNSMASQ_PID 2>/dev/null; then
         logger "Error: dnsmasq failed to start or crashed!" 0
         logger "DHCP will not work. Check dnsmasq configuration above." 0
-        # Don't exit here, AP might still work without DHCP
+        logger "dnsmasq error output: $dnsmasq_log" 0
+        logger "=== Trying dnsmasq without DNS (DHCP only) ===" 1
+        # Try starting dnsmasq with DNS disabled (port=0)
+        echo "port=0" >> /dnsmasq.conf
+        dnsmasq -C /dnsmasq.conf &
+        DNSMASQ_PID=$!
+        sleep 2
+        if ! kill -0 $DNSMASQ_PID 2>/dev/null; then
+            logger "Error: Even DHCP-only dnsmasq failed to start" 0
+            # Don't exit here, AP might still work without DHCP
+        else
+            logger "✓ dnsmasq started in DHCP-only mode" 1
+        fi
     else
         logger "✓ dnsmasq appears to be running and DHCP should be available" 1
         # Try to verify dnsmasq is listening

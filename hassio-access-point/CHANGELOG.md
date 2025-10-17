@@ -1,8 +1,29 @@
 # Changelog
 
-## [0.6.8] - 2025-10-17
+## [0.6.10] - 2025-10-17
 ### Fixed
-- Version upgrade with accumulated stability improvements
+- **Critical**: Fixed dnsmasq startup failure that prevented DHCP from working
+- Added comprehensive dnsmasq diagnostics to identify port conflicts and startup issues
+- Added `bind-interfaces` directive to prevent dnsmasq from conflicting with system services
+- Enhanced error handling with fallback to DHCP-only mode if DNS conflicts occur
+- Improved DNS server validation to prevent invalid configurations
+
+### Added
+- Pre-startup port diagnostics to identify DHCP/DNS port conflicts
+- Enhanced dnsmasq error logging and troubleshooting information
+- Fallback mechanism to start dnsmasq in DHCP-only mode if full mode fails
+
+## [0.6.9] - 2025-10-17
+### Fixed
+- **Critical**: Enabled DHCP by default so WiFi clients automatically receive IP addresses
+- **Critical**: Simplified iptables rules to prevent interference with normal WiFi access
+- Fixed issue where stopping addon would break TP-Link WiFi access to Home Assistant
+- Enabled IP forwarding for proper routing between WiFi clients and Home Assistant
+- Replaced complex NAT rules with simple INPUT rule to allow WiFi client access
+
+### Changed
+- Default DHCP setting changed from `false` to `true` for better user experience
+- Simplified networking approach to be less intrusive to system firewall rules
 
 ## [0.6.7] - 2025-10-17
 ### Fixed
