@@ -65,6 +65,41 @@ DEFAULT_ROUTE_INTERFACE=$(ip route show default | awk '/^default/ { print $5 }')
 
 echo "Starting Home Assistant Access Point Addon"
 
+# Diagnostic information
+logger "=== System Diagnostics ===" 1
+logger "Home Assistant Access Point v0.6.1" 1
+logger "Debug level: $DEBUG" 1
+logger "Interface: $INTERFACE" 1
+logger "SSID: $SSID" 1
+logger "Channel: $CHANNEL" 1
+logger "Address: $ADDRESS" 1
+
+# Check NetworkManager version
+if command -v nmcli >/dev/null 2>&1; then
+    NM_VERSION=$(nmcli --version 2>&1 || echo "unknown")
+    logger "NetworkManager info: $NM_VERSION" 1
+else
+    logger "NetworkManager: not available" 1
+fi
+
+# Check available wireless interfaces
+logger "Available wireless interfaces:" 1
+if command -v iw >/dev/null 2>&1; then
+    iw dev 2>/dev/null | grep Interface | awk '{print "  - " $2}' | while read line; do logger "$line" 1; done || logger "  No wireless interfaces found" 1
+else
+    logger "  iw command not available" 1
+fi
+
+# Check if hostapd is available
+if command -v hostapd >/dev/null 2>&1; then
+    HOSTAPD_VERSION=$(hostapd -v 2>&1 | head -n1 || echo "unknown")
+    logger "hostapd: $HOSTAPD_VERSION" 1
+else
+    logger "Error: hostapd not found!" 0
+    exit 1
+fi
+logger "=== End Diagnostics ===" 1
+
 # Setup interface
 logger "# Setup interface:" 1
 logger "Add to /etc/network/interfaces: iface $INTERFACE inet static" 1
@@ -73,14 +108,52 @@ echo "iface $INTERFACE inet static"$'\n' >> /etc/network/interfaces
 
 logger "Run command: nmcli dev set $INTERFACE managed no" 1
 # Check if NetworkManager is available and interface exists
-if nmcli dev status | grep -q "^$INTERFACE"; then
-    nmcli dev set $INTERFACE managed no
+if command -v nmcli >/dev/null 2>&1; then
+    # Check for NetworkManager version mismatch and try to handle it
+    if nmcli --version 2>/dev/null | grep -q "Warning.*versions don't match"; then
+        logger "Warning: NetworkManager version mismatch detected, attempting restart..." 1
+        # Try to restart NetworkManager if possible
+        systemctl restart NetworkManager 2>/dev/null || service NetworkManager restart 2>/dev/null || true
+        sleep 2
+    fi
+    
+    if nmcli dev status 2>/dev/null | grep -q "^$INTERFACE"; then
+        logger "Interface $INTERFACE found in NetworkManager, setting unmanaged" 1
+        nmcli dev set $INTERFACE managed no 2>/dev/null || logger "Warning: Failed to set interface unmanaged" 1
+    else
+        logger "Warning: Interface $INTERFACE not found in NetworkManager, continuing..." 1
+        # List available interfaces for debugging
+        logger "Available interfaces:" 1
+        nmcli dev status 2>/dev/null | while read line; do logger "$line" 1; done || true
+    fi
 else
-    logger "Warning: Interface $INTERFACE not found in NetworkManager, continuing..." 1
+    logger "Warning: nmcli not available, skipping NetworkManager configuration" 1
 fi
 
 logger "Run command: ip link set $INTERFACE down" 1
 ip link set $INTERFACE down
+
+# Verify interface exists and get its status
+if ! ip link show $INTERFACE >/dev/null 2>&1; then
+    logger "Error: Network interface $INTERFACE does not exist!" 0
+    logger "Available interfaces:" 0
+    ip link show | grep "^[0-9]" | awk '{print $2}' | sed 's/:$//' | while read iface; do
+        logger "  - $iface" 0
+    done
+    exit 1
+fi
+
+# Check if interface supports wireless
+if ! iw dev $INTERFACE info >/dev/null 2>&1; then
+    logger "Error: Interface $INTERFACE does not appear to be a wireless interface!" 0
+    logger "Wireless interfaces detected:" 0
+    iw dev 2>/dev/null | grep Interface | awk '{print $2}' | while read wiface; do
+        logger "  - $wiface" 0
+    done || logger "  No wireless interfaces found" 0
+    exit 1
+fi
+
+logger "Interface $INTERFACE validated successfully" 1
 
 logger "Add to /etc/network/interfaces: address $ADDRESS" 1
 echo "address $ADDRESS"$'\n' >> /etc/network/interfaces
@@ -284,23 +357,104 @@ fi
 # Start dnsmasq if DHCP is enabled in config
 if $(bashio::config.true "dhcp"); then
     logger "## Starting dnsmasq daemon" 1
-    dnsmasq -C /dnsmasq.conf
+    
+    # Show dnsmasq configuration if debug enabled
+    if [ $DEBUG -gt 0 ]; then
+        logger "dnsmasq configuration:" 1
+        cat /dnsmasq.conf | while read line; do logger "  $line" 1; done
+    fi
+    
+    # Test dnsmasq configuration
+    if dnsmasq --test -C /dnsmasq.conf 2>&1; then
+        logger "dnsmasq configuration test passed" 1
+    else
+        logger "Warning: dnsmasq configuration test failed" 1
+    fi
+    
+    # Start dnsmasq in background
+    dnsmasq -C /dnsmasq.conf &
+    DNSMASQ_PID=$!
+    logger "dnsmasq started with PID: $DNSMASQ_PID" 1
+    
+    # Give dnsmasq a moment to start
+    sleep 2
+    if ! kill -0 $DNSMASQ_PID 2>/dev/null; then
+        logger "Warning: dnsmasq may have failed to start" 1
+    else
+        logger "dnsmasq appears to be running" 1
+    fi
+else
+    logger "## DHCP disabled, skipping dnsmasq" 1
 fi
 
 logger "## Starting hostapd daemon" 1
+
+# Show final hostapd configuration for debugging
+if [ $DEBUG -gt 0 ]; then
+    logger "Final hostapd configuration:" 1
+    cat /hostapd.conf | while read line; do logger "  $line" 1; done
+fi
+
 # Verify hostapd configuration before starting
-if ! hostapd -t /hostapd.conf; then
+logger "Validating hostapd configuration..." 1
+if ! hostapd -t /hostapd.conf 2>&1; then
     logger "Error: hostapd configuration validation failed" 0
+    logger "Configuration file contents:" 0
+    cat /hostapd.conf
     exit 1
+fi
+logger "hostapd configuration validation passed" 1
+
+# Ensure interface is ready for hostapd
+logger "Preparing interface $INTERFACE for hostapd..." 1
+ip link set $INTERFACE up
+sleep 1
+
+# Check if another process is using the interface
+if pgrep -f "hostapd.*$INTERFACE" >/dev/null; then
+    logger "Warning: Another hostapd process may be running on $INTERFACE" 0
+    pkill -f "hostapd.*$INTERFACE" 2>/dev/null || true
+    sleep 2
 fi
 
 # If debug level is greater than 1, start hostapd in debug mode
 if [ $DEBUG -gt 1 ]; then
     logger "Starting hostapd in debug mode" 1
-    hostapd -d /hostapd.conf & wait ${!}
+    hostapd -d /hostapd.conf & 
+    HOSTAPD_PID=$!
+    logger "hostapd started with PID: $HOSTAPD_PID" 1
+    wait ${HOSTAPD_PID}
 else
     logger "Starting hostapd daemon" 1
-    hostapd /hostapd.conf & wait ${!}
+    hostapd /hostapd.conf &
+    HOSTAPD_PID=$!
+    logger "hostapd started with PID: $HOSTAPD_PID" 1
+    
+    # Give hostapd a moment to start and check if it's running
+    sleep 3
+    if ! kill -0 $HOSTAPD_PID 2>/dev/null; then
+        logger "Error: hostapd failed to start or crashed immediately" 0
+        logger "Check the hostapd logs above for errors" 0
+        exit 1
+    fi
+    logger "hostapd appears to be running successfully" 1
+    
+    # Wait a bit then check if AP is actually broadcasting
+    sleep 5
+    logger "Checking if access point is broadcasting..." 1
+    if command -v iw >/dev/null 2>&1; then
+        if iw dev $INTERFACE info | grep -q "type AP"; then
+            logger "✓ Interface $INTERFACE is in AP mode" 1
+        else
+            logger "⚠ Warning: Interface $INTERFACE may not be in AP mode" 1
+        fi
+        
+        # Try to scan for our own SSID (this might not work from the same interface)
+        logger "Interface status:" 1
+        iw dev $INTERFACE info | while read line; do logger "  $line" 1; done
+    fi
+    
+    wait ${HOSTAPD_PID}
 fi
 
 # If we reach this point, hostapd has exited - clean up

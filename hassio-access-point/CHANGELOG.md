@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.6.2] - 2025-10-17
+
+### Added
+- **Enhanced Diagnostics**: Added comprehensive system diagnostics during startup
+- **NetworkManager Version Handling**: Automatic detection and handling of NetworkManager version mismatches
+- **Interface Validation**: Better validation of wireless interfaces before attempting to configure
+- **Process Status Monitoring**: Added PID tracking and status checking for hostapd and dnsmasq
+- **Access Point Broadcasting Verification**: Added checks to verify AP is actually broadcasting after startup
+- **Configuration Display**: Enhanced debug output showing final configurations for troubleshooting
+
+### Fixed
+- **NetworkManager Compatibility**: Added automatic restart attempt when version mismatches are detected
+- **Interface Detection**: Better error messages when wireless interfaces are not found or available
+- **Service Startup Validation**: Added validation that hostapd and dnsmasq actually start successfully
+- **Error Handling**: Improved error messages and exit codes for failed configurations
+
+### Changed
+- **Startup Process**: More robust startup sequence with better status reporting
+- **Debug Output**: Enhanced debug information to help troubleshoot configuration issues
+- **Error Messages**: More descriptive error messages for common configuration problems
+
+## [0.6.1] - 2025-10-17
+
+### Fixed
+- **Docker Build Fixes**: Resolved Docker build failures for Alpine Linux compatibility
+- Fixed missing Alpine packages: replaced non-existent `awk` and `grep` packages with `gawk`
+- Updated Dockerfile format to modern standards (LABEL instead of MAINTAINER, proper ENV syntax)
+- Implemented custom netmask-to-CIDR conversion function, removing dependency on `ipcalc`
+- Added BUILD_FROM default value to prevent base image warnings
+- Updated repository URL to reflect new maintainer (adriy-be)
+
+### Changed
+- Modernized Dockerfile with current best practices and warning fixes
+- Improved IP address configuration with better fallback mechanisms
+- Enhanced error handling for network interface configuration
+
 ## [0.6.0] - 2025-01-17
 
 ### Changed
