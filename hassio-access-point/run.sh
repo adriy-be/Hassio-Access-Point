@@ -8,6 +8,12 @@ term_handler(){
 		iptables-nft -t nat -D POSTROUTING -o $DEFAULT_ROUTE_INTERFACE -j MASQUERADE 2>/dev/null || true
 		iptables-nft -P FORWARD DROP 2>/dev/null || true
 	fi
+	# Clean up Home Assistant access rules
+	iptables-nft -D INPUT -i $INTERFACE -p tcp --dport 8123 -j ACCEPT 2>/dev/null || true
+	iptables-nft -D INPUT -i $INTERFACE -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
+	iptables-nft -D INPUT -i $INTERFACE -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
+	iptables-nft -D INPUT -i $INTERFACE -p udp --dport 53 -j ACCEPT 2>/dev/null || true
+	iptables-nft -D INPUT -i $INTERFACE -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
 	# Clean up network interface
 	ifdown $INTERFACE 2>/dev/null || true
 	ip link set $INTERFACE down 2>/dev/null || true
@@ -486,6 +492,18 @@ if $(bashio::config.true "client_internet_access"); then
         logger "Warning: No default route interface found, client internet access may not work" 0
     fi
 fi
+
+# Always allow access to Home Assistant from WiFi clients
+logger "Setting up iptables rules for Home Assistant access" 1
+# Allow WiFi clients to reach Home Assistant on port 8123
+iptables-nft -I INPUT -i $INTERFACE -p tcp --dport 8123 -j ACCEPT 2>/dev/null || true
+# Allow WiFi clients to reach Home Assistant on port 80 (if used)
+iptables-nft -I INPUT -i $INTERFACE -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
+# Allow WiFi clients to reach Home Assistant on port 443 (if HTTPS is used)
+iptables-nft -I INPUT -i $INTERFACE -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
+# Allow DNS queries from WiFi clients
+iptables-nft -I INPUT -i $INTERFACE -p udp --dport 53 -j ACCEPT 2>/dev/null || true
+iptables-nft -I INPUT -i $INTERFACE -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
 
 # Start dnsmasq if DHCP is enabled in config
 if $(bashio::config.true "dhcp"); then

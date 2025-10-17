@@ -1,8 +1,19 @@
 # Changelog
 
+## [0.6.8] - 2025-10-17
+### Fixed
+- Version upgrade with accumulated stability improvements
+
 ## [0.6.7] - 2025-10-17
 ### Fixed
-- Version bump to 0.6.7 with all accumulated fixes
+- **Critical**: Added iptables rules to allow WiFi clients to access Home Assistant on port 8123
+- Fixed connectivity issue preventing access to Home Assistant web interface from WiFi clients
+- Added support for HTTP (port 80) and HTTPS (port 443) access to Home Assistant
+- Added DNS access rules for proper name resolution from WiFi clients
+
+### Added
+- Comprehensive iptables rules for Home Assistant access from WiFi access point
+- Proper cleanup of iptables rules when addon stops
 
 ## [0.6.6] - 2025-10-17
 ### Fixed
